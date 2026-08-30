@@ -1,0 +1,18 @@
+[general]
+name=QGIS Copilot
+qgisMinimumVersion=4.0
+qgisMaximumVersion=4.99
+description=Native Qt chat workbench for an explainable QGIS AI assistant.
+version=0.1.0
+author=QGIS Copilot contributors
+email=
+about=QGIS 内置 AI GIS 助手的原生 Qt 聊天工作台。Goal 1 仅提供本地界面骨架，不发送网络请求。
+category=Plugins
+repository=https://github.com/Astyyym/QGIS-Copilot
+tracker=https://github.com/Astyyym/QGIS-Copilot/issues
+homepage=https://github.com/Astyyym/QGIS-Copilot
+icon=
+experimental=True
+deprecated=False
+tags=AI,chat,GIS,QGIS
+license=GPL-3.0-only

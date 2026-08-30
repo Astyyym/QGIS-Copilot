@@ -1,0 +1,30 @@
+# Python bytecode and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# Local QGIS / test / build data
+*.qgz~
+*.gpkg
+*.sqlite
+*.db
+测试输出/
+dist/
+build/
+
+# Editors and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Credentials and local overrides
+.env
+.env.*
+*.key
+*.pem
+local_settings.*
+
+# Windows reserved-name debugging artifact
+NUL
