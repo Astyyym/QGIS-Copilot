@@ -1,16 +1,39 @@
 # QGIS Copilot
 
-QGIS Copilot 是运行在 QGIS 内的原生 Qt AI GIS 助手。它用自然语言读取当前项目，并把高风险 GIS 操作拆成**计划 → 人工确认 → Processing 执行 → 输出验证**；不要求安装 Hermes、Node.js、uv、MCP 客户端或独立服务。
+QGIS Copilot 是运行在 QGIS 内的原生 Qt AI GIS 工作台。它用自然语言帮助你理解当前项目、检查数据问题、预览分析条件，并把高风险 GIS 操作拆成：
 
-> **当前 MVP：** 已在 Windows / QGIS 4.2.1（Python 3.12.13，Qt/PyQt 6.11.0）完成开发与自动化回归。其他 QGIS 版本和操作系统尚未验证，不能视为兼容承诺。
+> **诊断/预览 → 计划 → 人工确认 → QGIS Processing → 输出验证 → 加入项目**
 
-## 能做什么
+它不要求安装 Hermes、Node.js、uv、MCP 客户端或独立服务。
+
+> **当前支持基线：** 已在 Windows / QGIS 4.2.1（Python 3.12.13，Qt/PyQt 6.11.0）完成首版 MVP 开发与真实用户路径验证。当前仓库还包含下一阶段“可信 GIS 工作台”的产品与开发计划；该增量能力须以各 Goal 的测试和真实 QGIS 验收为准，不能因文档列出而视为已发布。其他 QGIS 版本和操作系统尚未验证，不能视为兼容承诺。
+
+## 当前已可用能力
 
 - 读取当前项目、列出图层、检查字段与 CRS、查询指定图层前 N 条属性（严格限制 1–100 条）；
 - 通过 OpenAI-compatible `/chat/completions` 接入用户自选模型；
-- 展示模型工具调用的状态与结果摘要；
+- 显示模型工具调用状态和结果摘要；
 - 为矢量图层生成以**米**为单位的缓冲区计划；仅在用户点击“确认执行”后，创建新的 `.gpkg` 结果并验证、添加回项目；
-- 对已有输出文件默认拒绝覆盖；对地理 CRS 输入，先临时投影至米制 CRS 后再转回源 CRS。
+- 对已有输出文件默认拒绝覆盖；对地理 CRS 输入，先临时投影至米制 CRS 后再转回源 CRS；
+- 使用 QGIS Authentication Manager 安全保存 API Key，并支持重启 QGIS 后复用凭据。
+
+## 下一阶段：可信 GIS 工作台
+
+下一轮产品目标不是简单堆更多算法，而是补全真实工作链：
+
+```text
+看懂数据 → 发现问题 → 明确目标 → 形成方案 → 确认执行 → 验证结果 → 继续迭代
+```
+
+计划中的阶段能力包括：
+
+1. **会话透明度与工作台体验**：当前项目、模型、接口类型、模型行为模式、执行模式、快捷任务、工具卡、计划卡、审计记录和真实结果操作；
+2. **数据检查与分析**：项目健康检查、CRS 一致性、图层质量、字段统计、表达式筛选预览、空间关系预览和选择集摘要；
+3. **受控空间处理**：重投影、裁剪、筛选导出、相交、融合，以及已存在的缓冲区统一纳入计划—确认—验证闭环。
+
+### 模型行为模式
+
+“思考强度”不会被做成无效装饰。QGIS Copilot 将使用模型能力档案：所有模型可使用“服务默认”；只有模型接口被确认支持时，才会开放并实际发送快速、平衡或深度等行为参数。不支持时会明确显示由模型服务控制，且不会显示模型原始思维链。
 
 ## 安装（ZIP）
 
@@ -20,7 +43,7 @@ QGIS Copilot 是运行在 QGIS 内的原生 Qt AI GIS 助手。它用自然语�
 4. 在菜单 **QGIS Copilot → 打开 QGIS Copilot**，或工具栏点击同名按钮；
 5. 若刚安装后未显示，重启一次 QGIS 再检查插件管理器。
 
-开发者打包：在仓库根目录使用 QGIS 自带 Python 运行：
+开发者打包：在仓库根目录使用 QGIS 自带 Python：
 
 ```text
 D:/app/QGIS/bin/python-qgis.bat scripts/package_plugin.py
@@ -43,7 +66,7 @@ API Key 通过 QGIS Authentication Manager 保存；普通 QSettings 只保存�
 
 ## 权限与安全边界
 
-- `get_project_state`、`list_layers`、`inspect_layer`、`query_features` 是只读工具，不应修改项目、图层或源数据；
+- 当前 `get_project_state`、`list_layers`、`inspect_layer`、`query_features` 是只读工具，不应修改项目、图层或源数据；
 - `buffer_vector` 是写入计划工具：计划阶段不创建目录/文件、不加图层、不改源数据；
 - 写入必须在原生计划卡片中由用户明确确认；取消计划不会写入；
 - 默认拒绝覆盖已有 `.gpkg` 输出；不会执行任意 PyQGIS 代码；
@@ -52,8 +75,9 @@ API Key 通过 QGIS Authentication Manager 保存；普通 QSettings 只保存�
 
 ## 已知限制
 
-- 首发只支持 OpenAI-compatible HTTP 非流式聊天接口；
-- MVP 只实现了一个受确认的写入工具：新的 GeoPackage 矢量缓冲区；
+- 当前发行基线只支持 OpenAI-compatible HTTP 非流式聊天接口；
+- 当前 MVP 只实现了一个受确认的写入工具：新的 GeoPackage 矢量缓冲区；
+- 后续文档中规划的诊断、重投影、裁剪、导出、相交、融合和工作台卡片尚未因计划存在而自动成为当前发行能力；
 - 模型可能选择错误工具或生成无效参数；插件会安全失败，但请在确认执行前核对图层、距离、输出路径和 CRS 风险；
 - 取消运行中的 Processing 后，插件不会显示成功；请检查输出目录是否留有残留文件；
 - 目前只在 Windows + QGIS 4.2.1 验证，其他平台/版本需要独立测试。
@@ -68,7 +92,13 @@ QT_QPA_PLATFORM=offscreen D:/app/QGIS/bin/python-qgis.bat -m unittest discover -
 D:/app/QGIS/bin/python-qgis.bat scripts/package_plugin.py
 ```
 
-开发规则、产品边界和阶段证据分别见 `AGENTS.md`、`产品需求文档.md`、`开发短计划.md`、`task_plan.md` 与 `findings.md`。
+产品需求、架构、增量 Goal 计划、当前阶段状态与技术证据分别见：
+
+- `产品需求文档.md`
+- `架构说明.md`
+- `开发短计划.md`
+- `task_plan.md`
+- `findings.md`
 
 ## 许可证
 
