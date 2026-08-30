@@ -1,0 +1,19 @@
+[general]
+name=Astyyym QGIS MCP
+description=QGIS 4.x TCP socket server for AI-driven GIS operations via MCP
+version=1.0.1
+qgisMinimumVersion=4.0
+qgisMaximumVersion=4.99
+author=Chen Zikun (Astyyym)
+email=Astyyym@users.noreply.github.com
+homepage=https://github.com/Astyyym/QGIS-4.0-MCP-public
+tracker=https://github.com/Astyyym/QGIS-4.0-MCP-public/issues
+repository=https://github.com/Astyyym/QGIS-4.0-MCP-public
+license=MIT
+tags=mcp,ai,gis,qgis4,automation,socket
+category=Plugins
+experimental=False
+deprecated=False
+
+[about]
+about=Astyyym's QGIS 4.x MCP plugin. Connects AI agents such as Hermes to QGIS through a TCP socket for layer management, GIS analysis, processing, and project control.
