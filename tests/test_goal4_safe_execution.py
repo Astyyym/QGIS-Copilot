@@ -25,6 +25,8 @@ class GoalFourSafetyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         plugin_path = os.environ.get("QGIS_PLUGIN_PATH")
+        if not plugin_path:
+            plugin_path = str(Path("D:/app/QGIS") / "apps" / "qgis" / "python" / "plugins")
         if plugin_path and plugin_path not in sys.path:
             sys.path.insert(0, plugin_path)
         from processing.core.Processing import Processing

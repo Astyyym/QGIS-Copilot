@@ -6,7 +6,7 @@ QGIS Copilot 是运行在 QGIS 内的原生 Qt AI GIS 工作台。它用自然�
 
 它不要求安装 Hermes、Node.js、uv、MCP 客户端或独立服务。
 
-> **当前支持基线：** v0.2.0 已在 Windows / QGIS 4.2.1（Python 3.12.13，Qt/PyQt 6.11.0）完成开发、独立 QGIS 自动化回归、ZIP 打包和真实 QGIS Desktop 用户路径验收。其他 QGIS 版本和操作系统尚未验证，不能视为兼容承诺。
+> **当前支持基线：** v0.3.0 已在 Windows / QGIS 4.2.1（Python 3.12.13，Qt/PyQt 6.11.0）完成 Goal 1–12 开发、独立 QGIS 自动化回归、ZIP 打包和真实 QGIS Desktop 用户路径验收。其他 QGIS 版本和操作系统尚未验证，不能视为兼容承诺。
 
 ## 当前已可用能力
 
@@ -16,6 +16,8 @@ QGIS Copilot 是运行在 QGIS 内的原生 Qt AI GIS 工作台。它用自然�
 - 为矢量图层生成以**米**为单位的缓冲区计划；仅在用户点击“确认执行”后，创建新的 `.gpkg` 结果并验证、添加回项目；
 - 对已有输出文件默认拒绝覆盖；对地理 CRS 输入，先临时投影至米制 CRS 后再转回源 CRS；
 - 通过统一计划—确认—Processing—验证闭环生成新的重投影、裁剪、筛选导出、相交和融合 GeoPackage；相交支持明确的字段保留/前缀规则，融合必须明确分类字段或全量融合；
+- 只读检查栅格 provider、CRS、范围、尺寸、像元大小、波段、NoData 与有限统计；当前 Goal 10 代码已通过 QGIS bundled runtime，真实 Desktop 调用验收待完成；
+- 栅格整理已增加确认式裁剪、重投影和分区统计：分别生成新的栅格或 GeoPackage 结果，不原地修改输入；Goal 12 已通过 QGIS bundled runtime 和哥哥在真实 QGIS Desktop 中的成功、取消及覆盖保护验收；
 - 使用 QGIS Authentication Manager 安全保存 API Key，并支持重启 QGIS 后复用凭据。
 
 ## 当前工作台能力
@@ -67,8 +69,8 @@ API Key 通过 QGIS Authentication Manager 保存；普通 QSettings 只保存�
 
 ## 权限与安全边界
 
-- 当前 `get_project_state`、`list_layers`、`inspect_layer`、`query_features` 是只读工具，不应修改项目、图层或源数据；
-- `buffer_vector`、`reproject_layer`、`clip_vector`、`export_filtered_features`、`intersection`、`dissolve` 是写入计划工具：计划阶段不创建目录/文件、不加图层、不改源数据；
+- 当前 `get_project_state`、`list_layers`、`inspect_layer`、`query_features`、`inspect_raster`、`probe_raster_processing` 是只读工具，不应修改项目、图层、选择集或源数据；
+- `buffer_vector`、`reproject_layer`、`clip_vector`、`export_filtered_features`、`intersection`、`dissolve`、`clip_raster_by_mask`、`reproject_raster`、`zonal_statistics` 是写入计划工具：计划阶段不创建目录/文件、不加图层、不改源数据；
 - 写入必须在原生计划卡片中由用户明确确认；取消计划不会写入；
 - 默认拒绝覆盖已有 `.gpkg` 输出；不会执行任意 PyQGIS 代码；
 - 网络请求在 Qt 工作线程运行；QGIS 读取与 Processing 回到 QGIS 主线程；
@@ -78,6 +80,7 @@ API Key 通过 QGIS Authentication Manager 保存；普通 QSettings 只保存�
 
 - 当前发行基线只支持 OpenAI-compatible HTTP 非流式聊天接口；
 - 写入工具仅生成新的 GeoPackage，不原地编辑、不删除、不覆盖已有输出；相交要求 CRS 一致并对同名字段使用明确前缀，融合不允许默默猜测分类字段；
+- 栅格整理要求栅格与面图层 CRS 一致；重投影必须明确目标 CRS 与重采样；分区统计生成新的面图层并复制统计字段，不直接改写原分区图层；
 - 模型可能选择错误工具或生成无效参数；插件会安全失败，但请在确认执行前核对图层、距离、输出路径和 CRS 风险；
 - 取消运行中的 Processing 后，插件不会显示成功；请检查输出目录是否留有残留文件；
 - 目前只在 Windows + QGIS 4.2.1 验证，其他平台/版本需要独立测试。
@@ -95,6 +98,7 @@ QT_QPA_PLATFORM=offscreen <QGIS安装目录>/bin/python-qgis.bat -m unittest dis
 版本与发布说明：
 
 - [QGIS Copilot v0.2.0](release-notes-v0.2.0.md)：可信 GIS 工作台与 Goal 1–9 完整交付
+- [QGIS Copilot v0.3.0](release-notes-v0.3.0.md)：栅格基础、DEM 分析、栅格整理与分区统计
 
 > **后续兼容承诺：** Goal 1–9 和 v0.2.0 是 v3.0 的不可破坏基线。新能力按独立模块和逻辑任务单开代码文件、增量接入；未经单独批准不重写、重命名、搬迁或删除已验证实现。每个新 Goal 必须通过 Goal 1–9 固定回归和真实 QGIS Desktop 旧代表路径。
 

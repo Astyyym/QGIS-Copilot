@@ -18,14 +18,14 @@ from qgis_copilot.models.settings import ModelSettings, ModelSettingsStore
 from qgis_copilot.security.credentials import CredentialStoreError, QgisCredentialStore
 from qgis_copilot.security.redaction import redact_text
 from qgis_copilot.tasks.network import NetworkRequestThread
-from qgis_copilot.tasks.processing import BufferProcessingTask, ReprojectProcessingTask, VectorProcessingTask
+from qgis_copilot.tasks.processing import BufferProcessingTask, RasterOrganizationProcessingTask, RasterSlopeProcessingTask, ReprojectProcessingTask, VectorProcessingTask
 from qgis_copilot.tools.contracts import PermissionLevel
 from qgis_copilot.tools.qgis_tools import create_default_registry
 from qgis_copilot.ui.chat_dock import ChatDockWidget
 from qgis_copilot.ui.settings_dialog import SettingsDialog
 from qgis_copilot.ui.view_models import ChatState, ChatViewModel, ToolCard, WorkbenchStage
 
-_SYSTEM_PROMPT = "你是 QGIS Copilot。只读工具可直接调用。对于缓冲、重投影、裁剪或筛选导出请求，只能调用对应工具生成计划；计划会在界面展示，必须等待用户点击确认后才会执行 Processing。不得请求或声称执行写入、删除、覆盖、保存项目或任意代码。工具返回后必须根据真实结果回答，不能编造。"
+_SYSTEM_PROMPT = "你是 QGIS Copilot。只读工具可直接调用。对于缓冲、重投影、裁剪、筛选导出、相交、融合、DEM 坡度、栅格裁剪、栅格重投影或分区统计请求，只能调用对应工具生成计划；计划会在界面展示，必须等待用户点击确认后才会执行 Processing。不得请求或声称执行写入、删除、覆盖、保存项目或任意代码。工具返回后必须根据真实结果回答，不能编造。"
 
 
 def format_timeout_error(detail: str, timeout_seconds: int | None) -> str:
@@ -422,7 +422,7 @@ class ApplicationController(QObject):
         self._diagnostics.event(f"processing:{tool_name}", status="started", summary={"output_path": self._pending_plan.get("output_path", "")})
         self._audit("用户确认：开始 QGIS Processing")
         self.dock.set_stage(WorkbenchStage.PROCESSING, f"正在执行已确认的 {tool_name} 任务…")
-        task_type = {"reproject_layer": ReprojectProcessingTask, "clip_vector": VectorProcessingTask, "export_filtered_features": VectorProcessingTask, "intersection": VectorProcessingTask, "dissolve": VectorProcessingTask}.get(tool_name, BufferProcessingTask)
+        task_type = {"reproject_layer": ReprojectProcessingTask, "slope_from_dem": RasterSlopeProcessingTask, "clip_raster_by_mask": RasterOrganizationProcessingTask, "reproject_raster": RasterOrganizationProcessingTask, "zonal_statistics": RasterOrganizationProcessingTask, "clip_vector": VectorProcessingTask, "export_filtered_features": VectorProcessingTask, "intersection": VectorProcessingTask, "dissolve": VectorProcessingTask}.get(tool_name, BufferProcessingTask)
         task = task_type(self._pending_plan, self)
         self._processing_task = task
         task.completed.connect(self._on_processing_completed)
@@ -445,21 +445,23 @@ class ApplicationController(QObject):
         self._pending_plan = None
         self._processing_task = None
         self.dock.hide_execution_plan()
-        self._append("tool", f"Processing 成功：已生成 {result['output_path']}，并添加结果图层 {result['output_layer_name']}（{result['feature_count']} 个要素）。")
-        self._diagnostics.event(f"processing:{result.get('tool', 'reproject_layer' if 'target_crs' in result else 'buffer_vector')}", status="success", summary={"feature_count": result["feature_count"]})
+        output_count = result.get("feature_count")
+        output_summary = f"{output_count} 个要素" if output_count is not None else "栅格结果"
+        self._append("tool", f"Processing 成功：已生成 {result['output_path']}，并添加结果图层 {result['output_layer_name']}（{output_summary}）。")
+        self._diagnostics.event(f"processing:{result.get('tool', 'reproject_layer' if 'target_crs' in result else 'buffer_vector')}", status="success", summary={"feature_count": output_count if output_count is not None else 0})
         self.dock.add_tool_card(ToolCard(
             "Processing 输出",
-            f"已生成 {result['output_layer_name']}（{result['feature_count']} 个要素）。",
+            f"已生成 {result['output_layer_name']}（{output_summary}）。",
             json.dumps(result, ensure_ascii=False, default=str),
             actions=self._result_actions(result),
         ))
         self.view_model.cards.append(ToolCard(
             "Processing 输出",
-            f"已生成 {result['output_layer_name']}（{result['feature_count']} 个要素）。",
+            f"已生成 {result['output_layer_name']}（{output_summary}）。",
             json.dumps(result, ensure_ascii=False, default=str),
             actions=self._result_actions(result),
         ))
-        self._audit(f"完成：输出 {result['output_layer_name']}；{result['feature_count']} 个要素；源图层未覆盖")
+        self._audit(f"完成：输出 {result['output_layer_name']}；{output_summary}；源图层未覆盖")
         self._refresh_session_info()
         self.dock.set_stage(WorkbenchStage.COMPLETED, "GIS 处理完成，原始图层未被覆盖。")
 

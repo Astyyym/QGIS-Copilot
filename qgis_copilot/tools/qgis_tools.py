@@ -159,6 +159,10 @@ def create_default_registry() -> ToolRegistry:
     from .diagnostics_tools import diagnostic_specs
     from .processing_tools import processing_specs
     from .query_tools import query_specs
+    from .raster.diagnostics import raster_diagnostic_specs
+    from .raster.provider_probe import provider_probe_specs
+    from .raster.dem_plans import dem_plan_specs
+    from .raster.organization_plans import raster_organization_specs
     registry = ToolRegistry()
     layer_target = {"layer_id": {"type": "string", "description": "QGIS 图层 ID。"}, "name": {"type": "string", "description": "唯一的图层名称；重名时请改用 layer_id。"}}
     specs = [
@@ -171,6 +175,14 @@ def create_default_registry() -> ToolRegistry:
     for spec in specs:
         registry.register(spec)
     for spec in diagnostic_specs(ToolSpec, PermissionLevel):
+        registry.register(spec)
+    for spec in raster_diagnostic_specs(ToolSpec, PermissionLevel):
+        registry.register(spec)
+    for spec in provider_probe_specs(ToolSpec, PermissionLevel):
+        registry.register(spec)
+    for spec in dem_plan_specs(ToolSpec, PermissionLevel):
+        registry.register(spec)
+    for spec in raster_organization_specs():
         registry.register(spec)
     for spec in query_specs(ToolSpec, PermissionLevel):
         registry.register(spec)

@@ -175,6 +175,11 @@ class ChatDockWidget(QDockWidget):
     def set_audit_record(self, lines: list[str]): self.audit_detail.setText("\n".join(lines) if lines else "尚无活动会话。")
 
     def show_execution_plan(self, plan: dict):
+        if plan.get("tool") in {"slope_from_dem", "clip_raster_by_mask", "reproject_raster", "zonal_statistics"}:
+            from .raster_plan_card import format_raster_plan
+            self.plan_detail.setText(format_raster_plan(plan))
+            self.plan_card.show()
+            return
         risks = "\n".join(f"• {risk}" for risk in plan.get("risks", []))
         inputs = plan.get("inputs", {})
         if "input_layer_name" in inputs or "overlay_layer_name" in inputs:

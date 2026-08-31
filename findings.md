@@ -47,6 +47,45 @@
 
 ## 持续安全与范围边界
 
+## Goal 12 栅格整理与分区统计（2026-08-31）
+
+- 新增 `tools/raster/organization_plans.py` 与 `organization_validators.py`，将栅格裁剪、栅格重投影和分区统计保持在独立能力模块；未实现自由栅格计算器表达式。
+- `clip_raster_by_mask` 使用目标 QGIS 4.2.1 实际存在的 `gdal:cliprasterbymasklayer`，要求有效栅格、有效面掩膜和一致 CRS，输出新的 `.tif/.tiff`。
+- `reproject_raster` 使用实际存在的 `gdal:warpreproject`，要求明确有效目标 CRS；支持 `nearest`、`bilinear`、`cubic`、`cubicspline`、`lanczos` 和可选正分辨率，输出新的 `.tif/.tiff`。
+- `zonal_statistics` 使用实际存在的 `native:zonalstatisticsfb`，要求明确波段、统计项、字段前缀和一致 CRS 面分区图层；输出新的 `.gpkg`，不原地向分区图层添加字段。
+- 三项计划均拒绝已有输出；确认前没有文件、项目或源图层副作用。确认后的 `RasterOrganizationProcessingTask` 按工具选择算法，输出通过真实重开、CRS、非空栅格统计或分区要素数/统计字段验证后才加入项目；失败/取消会清理本次输出路径。
+- QGIS 4.2.1 bundled runtime 专项 `tests/test_goal12_raster_organization.py` 实际运行 `4/4 OK`，覆盖注册权限、计划零副作用/冲突拒绝、裁剪、重投影和分区统计成功路径及源数据不变。
+- 当前证据边界：Goal 12 真实 QGIS Desktop 已由哥哥确认正常栅格裁剪成功、正常分区统计成功、重投影取消和已有输出文件拒绝覆盖路径通过；本次截图主要可见重投影成功与覆盖保护，裁剪和分区统计以哥哥的实际测试结论记录。
+
+## Goal 11 坡度垂直切片（2026-08-31）
+
+- 新增 `tools/raster/dem_plans.py`、`dem_parameters.py`、`dem_validators.py`、`tasks/processing.py` 中独立 `RasterSlopeProcessingTask` 与 `ui/raster_plan_card.py`；只实现 `slope_from_dem`，未加入坡向或等高线。
+- 计划要求单波段有效 DEM、有效 CRS、明确高程/水平单位、Z factor 和新的 `.tif/.tiff` 输出；权限为既有 `WRITE`，确认前不创建输出、不加入图层、不修改源数据。
+- 目标 QGIS 4.2.1 实际提供 `gdal:warpreproject` 和 `gdal:slope`；地理 CRS 先自动选择中心点 UTM 米制 CRS 重投影，再执行坡度，结果验证可重开、单波段、范围有效、CRS 为计划米制 CRS，像元统计在 0–90 度内。
+- bundled runtime 专项 `tests/test_goal11_dem_analysis.py`：`4/4 OK`；投影合成平面 DEM 最大坡度约 45 度，地理 CRS 合成 DEM 也真实输出成功，源 DEM 未改变。
+- Goal 4 隔离回归 `9/9 OK`，Goal 9 隔离回归 `4/4 OK`，compileall `exit 0`。Goal 4 的测试启动路径已补齐 bundled Processing 插件目录。
+- Windows 临时 DEM 测试曾因 GDAL 文件句柄造成清理锁；测试使用 `ignore_cleanup_errors=True` 记录该环境限制，正式 Desktop 验收仍需检查输出与源数据，不以临时目录清理代替业务验证。
+- 当前状态：地理 CRS 工具根因已修复，代码、专项自动化和真实 QGIS Desktop 成功/取消/拒绝路径均已通过；失败路径以已有输出冲突拒绝作为参数拒绝证据，Goal 11 完成。
+- 哥哥提供的真实 Desktop 截图已补充成功证据：`pingshan` 的计划卡显示 EPSG:4326、meters/degrees、Z factor 1、目标米制 CRS EPSG:32650 与 `reproject_before_slope=true`；确认后显示 Processing 成功，输出为 `D:\wenjian\Hermes\QGIS Copilot\测试输出\pingshan_slope.tif`，结果图层 `pingshan_slope` 加入项目，界面显示原始图层未被覆盖。
+- 该截图未单独打开输出图层属性核对 CRS，故 Desktop 证据记录为成功输出与结果可见；输出 CRS 的独立可视核对仍待补充，不把项目状态栏 EPSG:4326 误当作输出图层 CRS。
+- 哥哥后续 Desktop 截图补齐最终验收：`inspect_raster(pingshan_slope)` 返回 EPSG:32650（WGS 84 / UTM zone 50N）、630×605、单波段、像元约 29.5586×29.5586 米、NoData -9999、坡度统计 0–54.4981 度，确认成功输出的 CRS 与数值语义可观察。
+- 取消路径：`pingshan_slope_cancel.tif` 的计划明确显示已取消、未生成输出文件、未写入或添加图层。冲突拒绝路径：已有 `pingshan_slope.tif` 时 `slope_from_dem` 在计划阶段提示输出文件已存在，未进入确认或 Processing，未覆盖原输出。Goal 11 的真实 Desktop 成功、取消、拒绝路径现已全部通过。
+
+## Goal 10 实现与证据（2026-08-31）
+
+- 2026-08-31 第二条栅格测试故障已定位：真实 `Practices_8.qgz` 中 `pingshan` 是有效 GDAL 栅格，EPSG:4326、641×571、单波段、NoData 已定义；`inspect_raster` 按可见名称和真实 layer ID 直接调用均成功。失败参数矩阵确认模型若把可见名称 `pingshan` 填入 `layer_id` 会返回“找不到指定图层”。现已在 `raster/diagnostics.py` 增加仅限栅格诊断的唯一名称兼容解析，真实名称误传至 `layer_id` 可恢复，重名仍拒绝。
+- 修复后 Goal 10 专项 5/5 exit 0；Goal 9 独立回归 4/4 exit 0；compileall exit 0；ZIP 已重新生成并包含修复。
+
+- 新增 `qgis_copilot/tools/raster/diagnostics.py`：`inspect_raster` 只读返回 provider、CRS、范围、宽高、像元大小、有限波段元数据、数据类型、NoData 与有限统计；最多返回 16 个波段，结果明确记录项目/图层/选择集/文件均未改变。
+- 新增 `qgis_copilot/tools/raster/provider_probe.py`：`probe_raster_processing` 只报告当前 QGIS Processing registry 中实际存在且 active 的 GDAL/native/GRASS/SAGA provider 与候选算法；不注册算法、不启动 Processing、不创建输出。
+- `create_default_registry()` 仅新增 `inspect_raster` 与 `probe_raster_processing` 两个 `READ_ONLY` 工具；未修改旧 ToolSpec、权限枚举、Controller、计划 payload 或矢量实现。
+- QGIS bundled runtime：QGIS 4.2.1 / Python 3.12.13 / Qt-PyQt 6.11.0；`compileall` exit 0；`test_goal10_raster_foundation.py` 4/4 exit 0。
+- 受影响旧回归使用独立 QGIS 进程：Goal 7 4/4、Goal 8 3/3、Goal 9 4/4，均 exit 0。
+- 真实 Desktop 已打开隔离临时项目，图层面板可见 `Goal10 Tiny DEM`，状态栏显示 EPSG:4326；权威源码与临时插件副本的 `metadata.txt`、两个 Goal 10 模块 SHA-256 一致。
+- Desktop 尚未完成插件启用与 Dock 调用：隔离 profile 的 Junction 创建受 Windows/MSYS 路径转换与 `mklink` 语法问题影响，改用实体副本后，QGIS 插件管理菜单的 UI 自动化窗口句柄失效（0x80070578），因此不能把 `inspect_raster` 的真实 Desktop 调用或失败/拒绝用户路径宣称为通过。
+- 当前 Goal 10 状态：代码和自动化通过；真实 Desktop 栅格可见性部分通过；插件用户路径阻塞。未实现 Goal 11 坡度、栅格写入计划、Processing 任务、输出验证器或专用计划卡。
+- 哥哥已确认 Goal 10 完成。真实 Desktop 截图显示 `inspect_raster` 对当前项目 `pingshan` 成功返回 EPSG:4326、641×571、单波段、NoData 与有限统计，并显示“检查未修改项目、图层或文件”；该截图作为 Goal 10 Desktop 阶段门的最终验收证据。Goal 10 不再阻塞，可进入 Goal 11，但仍未提前实现 Goal 11 内容。
+
 - 本轮不引入 Node.js、TypeScript、React、WebEngine、独立后端或 MCP；不修改 `references/QGIS-4.0-MCP-public/`。
 - 不上传完整项目、完整属性表、数据源路径、API Key 或无界要素；不开放任意代码、自动执行、原地编辑、删除、自动保存或覆盖已有输出。
 - 根目录仍有一个字面名为 `NUL` 的 0 字节 Windows 调试残留，未处理，避免误删任何其他路径。

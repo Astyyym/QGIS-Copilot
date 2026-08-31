@@ -2,10 +2,10 @@
 
 ## 当前阶段
 
-- 阶段：v2.0 Goal 1-9 与 v0.2.0 发布已完成；v3.0 功能扩展需求和路线图已建立
-- 状态：尚未开始 v3.0 产品代码；下一执行阶段为 Goal 10“能力治理与栅格基础底座”
+- 阶段：v2.0 Goal 1-9 与 v0.2.0 发布已完成；v3.0 Goal 10 已完成，正在执行 Goal 11
+- 状态：Goal 11 坡度分析已完成；代码、独立 QGIS 自动化和真实 Desktop 成功/取消/拒绝路径均已验收
 - 负责人：哥哥与小鱼共同确认
-- 当前进入条件：以 `开发短计划-v3.0.md` 完成 Goal 10 运行时探测和能力卡，不提前实现坡度、制图或报告
+- 当前进入条件：Goal 10 已由哥哥确认完成；本轮仅执行 Goal 11 的 `slope_from_dem`，不实现坡向/等高线/制图/报告
 
 ## 已确认
 
@@ -117,7 +117,14 @@
 - [x] 已冻结 Goal 1-9 为不可破坏兼容基线：禁止无批准重写、重命名、搬迁或删除稳定实现，旧契约变化必须兼容迁移；
 - [x] 已确立模块文件规则：不同业务模块和逻辑任务单开文件，Controller/UI/Registry 只做协调、展示与注册，不吸收具体能力逻辑；
 - [x] 已建立分层回归门：每个 Goal 跑专项、受影响旧回归和旧 Desktop 代表路径；只有公共契约变更、能力族完成、发布前或异常时才跑完整 Goal 1-9 矩阵；
-- [ ] Goal 10 产品代码与运行时探测尚未开始；不得把规划完成描述成功能已实现。
+- [x] Goal 10：能力治理与栅格基础底座（代码、自动化与真实 Desktop 验收通过）
+  - [x] 独立栅格只读诊断：provider、CRS、范围、宽高、像元大小、波段、数据类型、NoData 与有限统计
+  - [x] 结构化拒绝：缺失 CRS、非法波段、非栅格图层；未知 NoData 明确标记
+  - [x] 运行时 provider/候选算法探测；不注册 GDAL/native 写入算法，不启动 Processing
+  - [x] QGIS bundled runtime 专项测试 4/4 exit 0；Goal 7/8/9 受影响回归分别 4/4、3/3、4/4 exit 0；compileall exit 0
+  - [x] 临时 DEM 项目在真实 QGIS Desktop 打开，图层显示为 Goal10 Tiny DEM / EPSG:4326
+  - [x] 真实 Desktop 通过 Dock 调用 inspect_raster；pingshan 返回真实 CRS、范围、尺寸、波段、NoData 与统计摘要
+  - [x] Goal 10 完成门：Desktop 成功结果显示且明确未修改项目、图层或文件；provider 探测不执行算法
 
 ## 阶段门
 
@@ -139,3 +146,31 @@ Goal 1 全部验收通过：QGIS 4.2.1 已加载插件，工具栏出现“打�
 - 制图和报告分别等 Goal 10-12 与 Goal 13 阶段门，不与栅格底座同批开发；
 - 自动保存、默认覆盖、云端同步和在线账户不进入当前路线；
 - 当前仅更新需求和执行规划，不提交、推送、打包或发布新版本。
+
+## Goal 11 执行状态
+
+- [x] 新增独立坡度计划、参数语义、结果验证、栅格 Processing 任务与计划展示模块
+- [x] 注册 `slope_from_dem` 为 `WRITE` 计划工具；单波段、有效 CRS、显式单位、Z factor、新 `.tif/.tiff` 输出
+- [x] 计划阶段零副作用；已有输出、非法单位、CRS 与单位矛盾均结构化拒绝
+- [x] 地理 CRS 自动选择中心点 UTM 米制 CRS，先用 `gdal:warpreproject` 临时重投影，再用 `gdal:slope` 计算
+- [x] QGIS bundled runtime 专项 `4/4 OK`：投影与地理 CRS 合成 DEM 均可输出并验证，源 DEM 未改变
+- [x] Goal 9 受影响回归 `4/4 OK`；bundled compile `exit 0`
+- [x] Goal 4 受影响回归 `9/9 OK`；补齐 bundled Processing 路径启动前置
+- [x] 真实 QGIS Desktop 成功路径：`pingshan` 计划显示 EPSG:4326 → EPSG:32650，确认后 Processing 成功，输出 `测试输出/pingshan_slope.tif` 与 `pingshan_slope` 结果图层可见，界面显示源图层未覆盖
+- [x] 真实 QGIS Desktop 输出核对：`inspect_raster(pingshan_slope)` 显示 EPSG:32650、630×605、单波段、约 29.5586 米像元，坡度 0–54.4981 度
+- [x] 真实 QGIS Desktop 取消路径：`pingshan_slope_cancel.tif` 计划取消后未创建文件、未添加图层
+- [x] 真实 QGIS Desktop 参数拒绝路径：已有 `pingshan_slope.tif` 在计划阶段被拒绝，未覆盖、未进入确认或 Processing
+- [x] Goal 11 完成门：Desktop 成功、取消、拒绝证据、文档和最终回归已通过；可以进入坡向前的独立计划阶段
+
+## Goal 12 执行状态
+
+- [x] 新增独立栅格整理计划、结果验证和 Processing 任务模块；未开放自由栅格计算器表达式
+- [x] 注册 `clip_raster_by_mask`、`reproject_raster`、`zonal_statistics` 为 `WRITE` 计划工具
+- [x] 栅格裁剪要求有效单一 CRS 面掩膜，使用 `gdal:cliprasterbymasklayer`，输出新的 `.tif/.tiff`
+- [x] 栅格重投影要求明确目标 CRS、重采样方法和可选正分辨率，使用 `gdal:warpreproject`，输出新的 `.tif/.tiff`
+- [x] 分区统计要求明确栅格波段、统计项、字段前缀和面分区图层，使用 `native:zonalstatisticsfb`，输出新的 `.gpkg`，不原地写回分区图层
+- [x] 三项计划均在确认前拒绝已有输出、验证输入/CRS/参数，且不创建文件、不添加图层、不修改源数据
+- [x] 确认后通过独立 `RasterOrganizationProcessingTask` 执行；输出重开、CRS/尺寸/有限统计或分区要素数/统计字段验证通过后才加入项目
+- [x] QGIS bundled runtime 专项 `tests/test_goal12_raster_organization.py`：4/4 OK；真实算法探测到三个目标算法
+- [x] 普通 Python 编译检查通过；Goal 12 使用既有计划卡、Controller 确认链和结果卡接入
+- [x] 真实 QGIS Desktop 验收：哥哥已确认正常栅格裁剪成功、正常分区统计成功、重投影取消，以及已有输出文件拒绝覆盖路径均通过；裁剪/分区统计使用当前项目实际图层测试，结果按确认后 Processing、输出可见和源图层未原地写入验收
