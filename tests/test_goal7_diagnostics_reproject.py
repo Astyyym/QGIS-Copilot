@@ -25,11 +25,14 @@ from qgis_copilot.tools.processing_tools import plan_reproject
 class GoalSevenTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        plugin_path = Path("D:/app/QGIS/apps/qgis/python/plugins")
-        sys.path.insert(0, str(plugin_path)) if str(plugin_path) not in sys.path else None
-        from processing.core.Processing import Processing
         cls.app = QgsApplication([], False)
         cls.app.initQgis()
+        plugin_path = os.environ.get("QGIS_PLUGIN_PATH")
+        if not plugin_path:
+            plugin_path = str(Path(cls.app.prefixPath()) / "python" / "plugins")
+        if plugin_path not in sys.path:
+            sys.path.insert(0, plugin_path)
+        from processing.core.Processing import Processing
         Processing.initialize()
 
     @classmethod

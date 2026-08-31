@@ -22,12 +22,12 @@ from qgis_copilot.tools.qgis_tools import create_default_registry
 class GoalNineTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        plugin_path = Path("D:/app/QGIS/apps/qgis/python/plugins")
-        if str(plugin_path) not in sys.path:
-            sys.path.insert(0, str(plugin_path))
-        from processing.core.Processing import Processing
         cls.app = QgsApplication([], False)
         cls.app.initQgis()
+        plugin_path = os.environ.get("QGIS_PLUGIN_PATH") or str(Path(cls.app.prefixPath()) / "python" / "plugins")
+        if plugin_path not in sys.path:
+            sys.path.insert(0, plugin_path)
+        from processing.core.Processing import Processing
         Processing.initialize()
 
     @classmethod

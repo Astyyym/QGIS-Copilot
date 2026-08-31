@@ -23,10 +23,11 @@ from qgis_copilot.tools.query_tools import spatial_query_preview
 class GoalEightTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        plugin_path = Path("D:/app/QGIS/apps/qgis/python/plugins")
-        if str(plugin_path) not in sys.path: sys.path.insert(0, str(plugin_path))
+        cls.app = QgsApplication([], False); cls.app.initQgis()
+        plugin_path = os.environ.get("QGIS_PLUGIN_PATH") or str(Path(cls.app.prefixPath()) / "python" / "plugins")
+        if plugin_path not in sys.path: sys.path.insert(0, plugin_path)
         from processing.core.Processing import Processing
-        cls.app = QgsApplication([], False); cls.app.initQgis(); Processing.initialize()
+        Processing.initialize()
 
     @classmethod
     def tearDownClass(cls): cls.app.exitQgis()
