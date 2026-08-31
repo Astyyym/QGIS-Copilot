@@ -34,9 +34,12 @@ class QgisCredentialStore:
         # existing credential must use its dedicated API instead of re-storing it.
         if auth_config_id:
             config.setId(auth_config_id)
-            if not self._auth_manager.updateAuthenticationConfig(config):
-                raise CredentialStoreError("QGIS 未能更新已保存的 API Key。")
-            return auth_config_id
+            updated = self._auth_manager.updateAuthenticationConfig(config)
+            if updated and self._can_load_api_key(auth_config_id):
+                return auth_config_id
+            # Some QGIS builds report an update success for a stale ID, while
+            # the configuration is still not readable. Verify before reusing it.
+            config.setId("")
 
         result = self._auth_manager.storeAuthenticationConfig(config)
         # QGIS 4's Python binding returns (success, config); earlier bindings may
@@ -50,6 +53,13 @@ class QgisCredentialStore:
         if not stored:
             raise CredentialStoreError("QGIS 未能保存 API Key 到认证存储。")
         return config.id()
+
+    def _can_load_api_key(self, auth_config_id: str) -> bool:
+        probe = QgsAuthMethodConfig()
+        return bool(
+            self._auth_manager.loadAuthenticationConfig(auth_config_id, probe, True)
+            and probe.config("password", "")
+        )
 
     def load_api_key(self, auth_config_id: str | None) -> str:
         if not auth_config_id:

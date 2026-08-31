@@ -11,6 +11,7 @@ from .contracts import ExecutionPlan, PermissionLevel, ToolSpec
 from .registry import ToolRegistry
 
 
+
 DEFAULT_OUTPUT_DIRECTORY_NAME = "qgis_copilot_results"
 
 
@@ -155,6 +156,9 @@ def _object_schema(properties: dict[str, Any], required: list[str] | None = None
 
 
 def create_default_registry() -> ToolRegistry:
+    from .diagnostics_tools import diagnostic_specs
+    from .processing_tools import processing_specs
+    from .query_tools import query_specs
     registry = ToolRegistry()
     layer_target = {"layer_id": {"type": "string", "description": "QGIS 图层 ID。"}, "name": {"type": "string", "description": "唯一的图层名称；重名时请改用 layer_id。"}}
     specs = [
@@ -165,5 +169,11 @@ def create_default_registry() -> ToolRegistry:
         ToolSpec("buffer_vector", "生成新 GeoPackage 图层的矢量缓冲区计划；必须经用户确认后执行", PermissionLevel.WRITE, plan_buffer, _object_schema({**layer_target, "distance": {"type": "number", "exclusiveMinimum": 0}, "segments": {"type": "integer", "minimum": 1, "maximum": 100}, "dissolve": {"type": "boolean"}, "output_path": {"type": "string", "description": "新的 .gpkg 输出文件路径；已存在的文件会被拒绝。"}, "output_layer_name": {"type": "string"}}, ["distance"])),
     ]
     for spec in specs:
+        registry.register(spec)
+    for spec in diagnostic_specs(ToolSpec, PermissionLevel):
+        registry.register(spec)
+    for spec in query_specs(ToolSpec, PermissionLevel):
+        registry.register(spec)
+    for spec in processing_specs():
         registry.register(spec)
     return registry

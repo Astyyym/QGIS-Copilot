@@ -14,6 +14,7 @@ from .base import (
     ModelTimeoutError,
     ToolCall,
 )
+from .request_options import build_request_options
 from .settings import ModelSettings
 from qgis_copilot.security.redaction import redact_text
 
@@ -28,7 +29,15 @@ class OpenAICompatibleAdapter(ModelAdapter):
     def complete(self, messages: list[dict], cancel_event, tools: list[dict] | None = None) -> ChatCompletion:
         if cancel_event.is_set():
             raise ModelCancelledError("请求已取消。")
-        request_body = {"model": self._settings.model_name, "messages": messages, "stream": False}
+        request_body = {
+            "model": self._settings.model_name,
+            "messages": messages,
+            "stream": False,
+            **build_request_options(
+                self._settings.capability_profile,
+                self._settings.resolved_behavior_mode,
+            ),
+        }
         if tools:
             request_body["tools"] = tools
             request_body["tool_choice"] = "auto"

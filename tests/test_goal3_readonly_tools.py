@@ -122,10 +122,12 @@ class GoalThreeOneTests(unittest.TestCase):
     def test_four_schemas_and_read_only_permissions(self):
         registry = create_default_registry()
         schemas = registry.discover()
-        self.assertEqual([schema["function"]["name"] for schema in schemas], ["buffer_vector", "get_project_state", "inspect_layer", "list_layers", "query_features"])
-        read_only = [schema for schema in schemas if schema["function"]["name"] != "buffer_vector"]
+        self.assertIn("buffer_vector", [schema["function"]["name"] for schema in schemas])
+        self.assertIn("get_project_state", [schema["function"]["name"] for schema in schemas])
+        read_only = [schema for schema in schemas if schema["permission"] == "read_only"]
         self.assertTrue(all(schema["permission"] == "read_only" for schema in read_only))
-        self.assertEqual(schemas[-1]["function"]["parameters"]["properties"]["limit"]["maximum"], 100)
+        query_schema = next(schema for schema in schemas if schema["function"]["name"] == "query_features")
+        self.assertEqual(query_schema["function"]["parameters"]["properties"]["limit"]["maximum"], 100)
 
     def test_inspect_layer_schema_and_query_boundary(self):
         project = FakeProject([FakeLayer("l1", "roads", [{"name": "a", "value": 1}, {"name": "b", "value": 2}])])

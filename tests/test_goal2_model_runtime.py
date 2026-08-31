@@ -74,6 +74,13 @@ class _FakeAuthManager:
         return config_id == "auth-test-id"
 
 
+class _StaleAuthManager(_FakeAuthManager):
+    def storeAuthenticationConfig(self, config):
+        config.setId("fresh-auth-id")
+        self.config = config
+        return True
+
+
 class _SlowAdapter:
     def complete(self, _messages, cancel_event):
         for _ in range(80):
@@ -131,6 +138,10 @@ class GoalTwoModelRuntimeTests(unittest.TestCase):
         self.assertEqual(loaded.auth_config_id, auth_id)
         self.assertNotIn("secret-value", str(settings_store._settings.allKeys()))
         settings_store.clear()
+
+    def test_stale_auth_id_creates_a_new_configuration(self):
+        store = QgisCredentialStore(_StaleAuthManager())
+        self.assertEqual(store.save_api_key("secret-value", "deleted-auth-id"), "fresh-auth-id")
 
     def test_agent_budget_is_bounded(self):
         agent = AgentCore("system", max_steps=1)

@@ -132,3 +132,123 @@ class BufferProcessingTask(QObject):
             self._temp_dir.rmdir()
         except OSError:
             pass
+
+
+class ReprojectProcessingTask(QObject):
+    """Execute a confirmed reprojection and verify the new layer before insertion."""
+
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+    cancelled = pyqtSignal()
+
+    def __init__(self, plan: dict[str, Any], parent=None):
+        super().__init__(parent)
+        self.plan = plan
+        self._context = QgsProcessingContext()
+        self._context.setProject(QgsProject.instance())
+        self._feedback = QgsProcessingFeedback()
+        self._task = None
+        self._cancel_requested = False
+
+    def start(self) -> None:
+        algorithm = QgsApplication.processingRegistry().algorithmById("native:reprojectlayer")
+        if algorithm is None:
+            self.failed.emit("当前 QGIS 未提供 native:reprojectlayer，未生成输出。")
+            return
+        self._task = QgsProcessingAlgRunnerTask(algorithm, self.plan["processing_parameters"], self._context, self._feedback)
+        self._task.executed.connect(self._on_executed)
+        QgsApplication.taskManager().addTask(self._task)
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+        if self._task is not None:
+            self._task.cancel()
+
+    def _on_executed(self, successful: bool, results: dict) -> None:
+        if self._cancel_requested or (self._task is not None and self._task.isCanceled()):
+            self._remove_partial_output()
+            self.cancelled.emit()
+            return
+        if not successful:
+            self._remove_partial_output()
+            self.failed.emit("重投影 Processing 失败；未把结果添加到项目。")
+            return
+        output_path = Path(self.plan["output_path"])
+        if not output_path.is_file():
+            self.failed.emit(f"Processing 已结束，但未找到输出文件：{output_path}")
+            return
+        layer = QgsVectorLayer(str(output_path), self.plan["output_layer_name"], "ogr")
+        if not layer.isValid() or layer.crs().authid() != self.plan["target_crs"]:
+            del layer
+            self._remove_partial_output()
+            self.failed.emit("输出文件无法验证为有效图层或目标 CRS 不正确；未加入项目。")
+            return
+        QgsProject.instance().addMapLayer(layer)
+        self.completed.emit({"output_path": str(output_path), "output_layer_id": layer.id(),
+                             "output_layer_name": layer.name(), "feature_count": layer.featureCount(),
+                             "source_layer_id": self.plan["inputs"]["layer_id"], "target_crs": layer.crs().authid()})
+
+    def _remove_partial_output(self) -> None:
+        """The confirmed path was required to be new, so a failed partial file is safe to remove."""
+        output = Path(self.plan["output_path"])
+        try:
+            if output.is_file():
+                output.unlink()
+        except OSError:
+            pass
+
+
+class VectorProcessingTask(QObject):
+    """Shared confirmed runner for clip and filtered export; verifies before insertion."""
+    completed = pyqtSignal(object)
+    failed = pyqtSignal(str)
+    cancelled = pyqtSignal()
+
+    def __init__(self, plan: dict[str, Any], parent=None):
+        super().__init__(parent); self.plan = plan; self._task = None; self._cancel_requested = False
+        self._context = QgsProcessingContext(); self._context.setProject(QgsProject.instance()); self._feedback = QgsProcessingFeedback()
+
+    def start(self):
+        if self.plan["tool"] == "export_filtered_features":
+            kind = self.plan["parameters"]["filter_kind"]; source = self.plan["source_layer"]
+            if kind == "selection" and sorted(source.selectedFeatureIds()) != self.plan["parameters"]["selected_feature_ids"]:
+                self.failed.emit("当前选择集已变化；已拒绝导出，未生成输出。"); return
+            if kind == "expression":
+                algorithm_id = "native:extractbyexpression"
+                self.plan["processing_parameters"]["EXPRESSION"] = self.plan["parameters"]["expression"]
+            elif kind == "selection":
+                algorithm_id = "native:saveselectedfeatures"
+            else:
+                algorithm_id = "native:extractbyexpression"
+                self.plan["processing_parameters"]["EXPRESSION"] = "$id IN (" + ",".join(str(x) for x in self.plan["parameters"]["matched_feature_ids"]) + ")"
+        elif self.plan["tool"] == "clip_vector":
+            algorithm_id = "native:clip"
+        elif self.plan["tool"] == "intersection":
+            algorithm_id = "native:intersection"
+        elif self.plan["tool"] == "dissolve":
+            algorithm_id = "native:dissolve"
+        else:
+            self.failed.emit("未知的矢量 Processing 类型；未生成输出。"); return
+        algorithm = QgsApplication.processingRegistry().algorithmById(algorithm_id)
+        if algorithm is None: self.failed.emit(f"当前 QGIS 未提供 {algorithm_id}，未生成输出。"); return
+        Path(self.plan["output_path"]).parent.mkdir(parents=True, exist_ok=True)
+        self._task = QgsProcessingAlgRunnerTask(algorithm, self.plan["processing_parameters"], self._context, self._feedback)
+        self._task.executed.connect(self._done); QgsApplication.taskManager().addTask(self._task)
+
+    def cancel(self):
+        self._cancel_requested = True
+        if self._task: self._task.cancel()
+
+    def _done(self, successful, _results):
+        if self._cancel_requested or (self._task and self._task.isCanceled()): self._remove(); self.cancelled.emit(); return
+        output = Path(self.plan["output_path"])
+        if not successful or not output.is_file(): self._remove(); self.failed.emit("矢量 Processing 失败；未把结果添加到项目。"); return
+        layer = QgsVectorLayer(str(output), self.plan["output_layer_name"], "ogr")
+        if not layer.isValid(): self._remove(); self.failed.emit("输出无法重新打开为有效图层；未加入项目。"); return
+        QgsProject.instance().addMapLayer(layer)
+        result = {"output_path": str(output), "output_layer_id": layer.id(), "output_layer_name": layer.name(), "feature_count": layer.featureCount(), "source_layer_id": self.plan["inputs"].get("layer_id", self.plan["inputs"].get("input_layer_id")), "tool": self.plan["tool"]}
+        self.completed.emit(result)
+
+    def _remove(self):
+        try: Path(self.plan["output_path"]).unlink(missing_ok=True)
+        except OSError: pass

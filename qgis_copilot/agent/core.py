@@ -58,6 +58,12 @@ class AgentCore:
     def reset_request_budget(self) -> None:
         self._steps = 0
 
+    def reset_conversation(self) -> None:
+        """Clear the current session and restore the fixed system boundary."""
+        self._conversation.reset()
+        self._conversation.add("system", self._system_prompt)
+        self.reset_request_budget()
+
     def _add_model_turn(self) -> None:
         if self._steps >= self._max_steps:
             raise RuntimeError("已达到本次请求的最大调用步数，未继续请求模型。")

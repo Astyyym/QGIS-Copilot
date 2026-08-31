@@ -6,7 +6,7 @@ QGIS Copilot 是运行在 QGIS 内的原生 Qt AI GIS 工作台。它用自然�
 
 它不要求安装 Hermes、Node.js、uv、MCP 客户端或独立服务。
 
-> **当前支持基线：** 已在 Windows / QGIS 4.2.1（Python 3.12.13，Qt/PyQt 6.11.0）完成首版 MVP 开发与真实用户路径验证。当前仓库还包含下一阶段“可信 GIS 工作台”的产品与开发计划；该增量能力须以各 Goal 的测试和真实 QGIS 验收为准，不能因文档列出而视为已发布。其他 QGIS 版本和操作系统尚未验证，不能视为兼容承诺。
+> **当前支持基线：** v0.2.0 已在 Windows / QGIS 4.2.1（Python 3.12.13，Qt/PyQt 6.11.0）完成开发、独立 QGIS 自动化回归、ZIP 打包和真实 QGIS Desktop 用户路径验收。其他 QGIS 版本和操作系统尚未验证，不能视为兼容承诺。
 
 ## 当前已可用能力
 
@@ -15,21 +15,22 @@ QGIS Copilot 是运行在 QGIS 内的原生 Qt AI GIS 工作台。它用自然�
 - 显示模型工具调用状态和结果摘要；
 - 为矢量图层生成以**米**为单位的缓冲区计划；仅在用户点击“确认执行”后，创建新的 `.gpkg` 结果并验证、添加回项目；
 - 对已有输出文件默认拒绝覆盖；对地理 CRS 输入，先临时投影至米制 CRS 后再转回源 CRS；
+- 通过统一计划—确认—Processing—验证闭环生成新的重投影、裁剪、筛选导出、相交和融合 GeoPackage；相交支持明确的字段保留/前缀规则，融合必须明确分类字段或全量融合；
 - 使用 QGIS Authentication Manager 安全保存 API Key，并支持重启 QGIS 后复用凭据。
 
-## 下一阶段：可信 GIS 工作台
+## 当前工作台能力
 
-下一轮产品目标不是简单堆更多算法，而是补全真实工作链：
+当前工作台围绕以下真实工作链运行：
 
 ```text
 看懂数据 → 发现问题 → 明确目标 → 形成方案 → 确认执行 → 验证结果 → 继续迭代
 ```
 
-计划中的阶段能力包括：
+已完成的能力包括：
 
 1. **会话透明度与工作台体验**：当前项目、模型、接口类型、模型行为模式、执行模式、快捷任务、工具卡、计划卡、审计记录和真实结果操作；
 2. **数据检查与分析**：项目健康检查、CRS 一致性、图层质量、字段统计、表达式筛选预览、空间关系预览和选择集摘要；
-3. **受控空间处理**：重投影、裁剪、筛选导出、相交、融合，以及已存在的缓冲区统一纳入计划—确认—验证闭环。
+3. **受控空间处理**：缓冲、重投影、裁剪、筛选导出、相交、融合统一纳入计划—确认—验证闭环。
 
 ### 模型行为模式
 
@@ -46,7 +47,7 @@ QGIS Copilot 是运行在 QGIS 内的原生 Qt AI GIS 工作台。它用自然�
 开发者打包：在仓库根目录使用 QGIS 自带 Python：
 
 ```text
-D:/app/QGIS/bin/python-qgis.bat scripts/package_plugin.py
+<QGIS安装目录>/bin/python-qgis.bat scripts/package_plugin.py
 ```
 
 输出为 `dist/qgis_copilot.zip`。ZIP 仅含一个顶层目录 `qgis_copilot/`，以及插件必需的 `metadata.txt`、`__init__.py` 和 `LICENSE`；不含测试、参考仓库、Git、缓存、数据库或密钥文件。
@@ -67,7 +68,7 @@ API Key 通过 QGIS Authentication Manager 保存；普通 QSettings 只保存�
 ## 权限与安全边界
 
 - 当前 `get_project_state`、`list_layers`、`inspect_layer`、`query_features` 是只读工具，不应修改项目、图层或源数据；
-- `buffer_vector` 是写入计划工具：计划阶段不创建目录/文件、不加图层、不改源数据；
+- `buffer_vector`、`reproject_layer`、`clip_vector`、`export_filtered_features`、`intersection`、`dissolve` 是写入计划工具：计划阶段不创建目录/文件、不加图层、不改源数据；
 - 写入必须在原生计划卡片中由用户明确确认；取消计划不会写入；
 - 默认拒绝覆盖已有 `.gpkg` 输出；不会执行任意 PyQGIS 代码；
 - 网络请求在 Qt 工作线程运行；QGIS 读取与 Processing 回到 QGIS 主线程；
@@ -76,23 +77,26 @@ API Key 通过 QGIS Authentication Manager 保存；普通 QSettings 只保存�
 ## 已知限制
 
 - 当前发行基线只支持 OpenAI-compatible HTTP 非流式聊天接口；
-- 当前 MVP 只实现了一个受确认的写入工具：新的 GeoPackage 矢量缓冲区；
-- 后续文档中规划的诊断、重投影、裁剪、导出、相交、融合和工作台卡片尚未因计划存在而自动成为当前发行能力；
+- 写入工具仅生成新的 GeoPackage，不原地编辑、不删除、不覆盖已有输出；相交要求 CRS 一致并对同名字段使用明确前缀，融合不允许默默猜测分类字段；
 - 模型可能选择错误工具或生成无效参数；插件会安全失败，但请在确认执行前核对图层、距离、输出路径和 CRS 风险；
 - 取消运行中的 Processing 后，插件不会显示成功；请检查输出目录是否留有残留文件；
 - 目前只在 Windows + QGIS 4.2.1 验证，其他平台/版本需要独立测试。
 
 ## 开发与验证
 
-权威源码目录：`D:\wenjian\Hermes\QGIS Copilot`。请使用 QGIS 自带 Python，而非系统 Python：
+请在仓库根目录使用 QGIS 自带 Python，而非系统 Python：
 
 ```text
-D:/app/QGIS/bin/python-qgis.bat -m compileall -q qgis_copilot tests scripts
-QT_QPA_PLATFORM=offscreen D:/app/QGIS/bin/python-qgis.bat -m unittest discover -s tests -v
-D:/app/QGIS/bin/python-qgis.bat scripts/package_plugin.py
+<QGIS安装目录>/bin/python-qgis.bat -m compileall -q qgis_copilot tests scripts
+QT_QPA_PLATFORM=offscreen <QGIS安装目录>/bin/python-qgis.bat -m unittest discover -s tests -v
+<QGIS安装目录>/bin/python-qgis.bat scripts/package_plugin.py
 ```
 
-产品需求、架构、增量 Goal 计划、当前阶段状态与技术证据分别见：
+版本与发布说明：
+
+- [QGIS Copilot v0.2.0](release-notes-v0.2.0.md)：可信 GIS 工作台与 Goal 1–9 完整交付
+
+产品需求、架构、开发计划、当前阶段状态与技术证据分别见：
 
 - `产品需求文档.md`
 - `架构说明.md`

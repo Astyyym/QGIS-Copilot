@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from qgis.PyQt.QtCore import QObject
+from qgis.core import QgsProject
+from qgis.utils import iface as qgis_iface
 
 from qgis_copilot.agent.core import AgentCore
 from qgis_copilot.context.project_context import build_model_project_context
@@ -15,14 +18,14 @@ from qgis_copilot.models.settings import ModelSettings, ModelSettingsStore
 from qgis_copilot.security.credentials import CredentialStoreError, QgisCredentialStore
 from qgis_copilot.security.redaction import redact_text
 from qgis_copilot.tasks.network import NetworkRequestThread
-from qgis_copilot.tasks.processing import BufferProcessingTask
+from qgis_copilot.tasks.processing import BufferProcessingTask, ReprojectProcessingTask, VectorProcessingTask
 from qgis_copilot.tools.contracts import PermissionLevel
 from qgis_copilot.tools.qgis_tools import create_default_registry
 from qgis_copilot.ui.chat_dock import ChatDockWidget
 from qgis_copilot.ui.settings_dialog import SettingsDialog
-from qgis_copilot.ui.view_models import ChatState, ChatViewModel
+from qgis_copilot.ui.view_models import ChatState, ChatViewModel, ToolCard, WorkbenchStage
 
-_SYSTEM_PROMPT = "你是 QGIS Copilot。只读工具可直接调用。对于用户请求创建矢量缓冲区，只能调用 buffer_vector 生成计划；计划会在界面展示，必须等待用户点击确认后才会执行 Processing。不得请求或声称执行写入、删除、覆盖、保存项目或任意代码。工具返回后必须根据真实结果回答，不能编造。"
+_SYSTEM_PROMPT = "你是 QGIS Copilot。只读工具可直接调用。对于缓冲、重投影、裁剪或筛选导出请求，只能调用对应工具生成计划；计划会在界面展示，必须等待用户点击确认后才会执行 Processing。不得请求或声称执行写入、删除、覆盖、保存项目或任意代码。工具返回后必须根据真实结果回答，不能编造。"
 
 
 def format_timeout_error(detail: str, timeout_seconds: int | None) -> str:
@@ -51,16 +54,156 @@ class ApplicationController(QObject):
         self._active_timeout_seconds = None
         self._pending_plan = None
         self._processing_task = None
+        self._audit_lines = []
+        self._sessions = [{"agent": self._agent, "view_model": self.view_model, "audit": [], "plan": None}]
+        self._current_session_index = 0
         self.dock.message_submitted.connect(self.submit_message)
         self.dock.cancel_requested.connect(self.cancel_request)
         self.dock.retry_requested.connect(self.retry_last_message)
         self.dock.plan_confirmed.connect(self.confirm_pending_plan)
         self.dock.plan_cancelled.connect(self.cancel_pending_plan)
         self.dock.settings_requested.connect(self.show_settings)
+        self.dock.layer_zoom_requested.connect(self.zoom_to_layer)
+        self.dock.layer_attributes_requested.connect(self.open_attribute_table)
+        self.dock.output_path_requested.connect(self.open_output_path)
+        self.dock.new_session_requested.connect(self.new_session)
+        self.dock.session_selected.connect(self.switch_session)
+        self._refresh_session_selector()
+
+    def _save_current_session(self):
+        self._sessions[self._current_session_index] = {"agent": self._agent, "view_model": self.view_model, "audit": list(self._audit_lines), "plan": self._pending_plan}
+
+    def _refresh_session_selector(self):
+        self.dock.set_session_items([f"会话 {i + 1}" for i in range(len(self._sessions))], self._current_session_index)
+
+    def switch_session(self, index: int):
+        if index < 0 or index >= len(self._sessions) or index == self._current_session_index:
+            return
+        if self._network_thread or self._processing_task:
+            self._refresh_session_selector()
+            self.dock.set_stage(WorkbenchStage.FAILED, "当前请求或 Processing 正在运行，请完成或停止后再切换会话。")
+            return
+        self._save_current_session()
+        self._current_session_index = index
+        saved = self._sessions[index]
+        self._agent, self.view_model = saved["agent"], saved["view_model"]
+        self._audit_lines, self._pending_plan = list(saved["audit"]), saved["plan"]
+        self.dock.restore_session_view(self.view_model.messages, self.view_model.cards, self._audit_lines, self._pending_plan)
+        self._refresh_session_selector()
+        self.dock.set_stage(WorkbenchStage.WAITING_CONFIRMATION if self._pending_plan else WorkbenchStage.READY, "已切换到历史会话。")
+
+    def new_session(self):
+        """Clear chat state only when no network/Processing operation is active."""
+        if self._network_thread or self._processing_task:
+            self.dock.set_stage(WorkbenchStage.FAILED, "当前请求或 Processing 正在运行，请先停止后再新建会话。")
+            return
+        self._save_current_session()
+        self._agent = AgentCore(_SYSTEM_PROMPT, max_steps=3, tool_registry=self.tool_registry)
+        self.view_model = ChatViewModel()
+        self._last_message = None
+        self._pending_plan = None
+        self._audit_lines = []
+        self._sessions.append({"agent": self._agent, "view_model": self.view_model, "audit": [], "plan": None})
+        self._current_session_index = len(self._sessions) - 1
+        self.dock.clear_session_view()
+        self._refresh_session_selector()
+        self.dock.set_stage(WorkbenchStage.READY, "已新建会话；未修改 QGIS 项目或图层。")
+
+    def zoom_to_layer(self, layer_id: str):
+        """Zoom the real map canvas to a current layer; never alters project data."""
+        layer = QgsProject.instance().mapLayer(layer_id)
+        if layer is None or not layer.isValid():
+            self._result_action_error("缩放至图层", "目标图层已不存在或不可用。")
+            return
+        iface = qgis_iface
+        if iface is None or iface.mapCanvas() is None:
+            self._result_action_error("缩放至图层", "当前 QGIS 地图画布不可用。")
+            return
+        canvas = iface.mapCanvas()
+        canvas.setExtent(layer.extent())
+        canvas.refresh()
+        self._audit(f"结果动作：已缩放至图层 {layer.name()}；未修改项目或数据")
+        self.dock.set_stage(WorkbenchStage.COMPLETED, f"已缩放至图层：{layer.name()}。")
+
+    def open_attribute_table(self, layer_id: str):
+        """Open the native QGIS attribute table only for a current vector layer."""
+        layer = QgsProject.instance().mapLayer(layer_id)
+        if layer is None or not layer.isValid():
+            self._result_action_error("打开属性表", "目标图层已不存在或不可用。")
+            return
+        if not hasattr(layer, "fields") or not hasattr(layer, "getFeatures"):
+            self._result_action_error("打开属性表", "目标图层不支持属性表。")
+            return
+        iface = qgis_iface
+        if iface is None:
+            self._result_action_error("打开属性表", "当前 QGIS 界面不可用。")
+            return
+        iface.showAttributeTable(layer)
+        self._audit(f"结果动作：已打开属性表 {layer.name()}；未修改项目或数据")
+        self.dock.set_stage(WorkbenchStage.COMPLETED, f"已打开属性表：{layer.name()}。")
+
+    def open_output_path(self, raw_path: str):
+        """Open an existing output's containing folder, never create or overwrite files."""
+        path = Path(raw_path)
+        target = path if path.is_dir() else path.parent
+        if not path.exists() or not target.is_dir():
+            self._result_action_error("查看输出路径", "输出文件或目录已不存在。")
+            return
+        from qgis.PyQt.QtCore import QUrl
+        from qgis.PyQt.QtGui import QDesktopServices
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target))):
+            self._result_action_error("查看输出路径", "QGIS 无法打开输出目录。")
+            return
+        self._audit(f"结果动作：已查看输出目录 {target}；未修改项目或数据")
+        self.dock.set_stage(WorkbenchStage.COMPLETED, "已打开输出目录。")
+
+    def _result_action_error(self, action: str, detail: str):
+        self._audit(f"结果动作不可用：{action}；{detail}")
+        self.dock.set_stage(WorkbenchStage.FAILED, f"{action}失败：{detail}")
+
+    @staticmethod
+    def _result_actions(result: dict):
+        """Expose only actions backed by result IDs/paths; stale targets revalidate on click."""
+        from qgis_copilot.ui.view_models import ResultAction
+        data = result.get("data", {})
+        layer = data.get("layer", {}) if isinstance(data.get("layer"), dict) else {}
+        layer_id = data.get("layer_id") or layer.get("id")
+        actions = []
+        if isinstance(layer_id, str) and layer_id:
+            actions.extend((
+                ResultAction("zoom_layer", "缩放至图层", layer_id),
+                ResultAction("open_attributes", "打开属性表", layer_id),
+            ))
+        output_path = data.get("output_path")
+        if isinstance(output_path, str) and output_path:
+            actions.append(ResultAction("open_output_path", "查看输出路径", output_path))
+        return tuple(actions)
 
     def activate(self):
         self._active = True
-        self.dock.set_state(ChatState.READY)
+        self._refresh_session_info()
+        self.dock.set_stage(WorkbenchStage.READY)
+
+    def _refresh_session_info(self):
+        project = QgsProject.instance()
+        try:
+            settings = self._settings_store.load()
+        except ValueError:
+            settings = None
+        self.dock.update_session_info({
+            "project_name": project.title() or "未命名项目",
+            "saved_state": "已保存" if project.fileName() else "未保存",
+            "layer_count": len(project.mapLayers()),
+            "model_name": settings.model_name if settings else "未配置",
+            "interface_type": settings.capability_profile.interface_type if settings else "未连接",
+            "connection_state": "已配置" if settings else "未配置",
+            "behavior_mode": (settings.behavior_mode if settings else "服务默认").replace("service_default", "服务默认"),
+            "execution_mode": "只读；写入需确认",
+        })
+
+    def _audit(self, detail: str):
+        self._audit_lines.append(detail)
+        self.dock.set_audit_record(self._audit_lines[-12:])
 
     def deactivate(self):
         self._active = False
@@ -77,6 +220,9 @@ class ApplicationController(QObject):
             self.show_settings()
             return
         self._last_message = text
+        self._audit_lines = [f"模型：{settings.model_name}；行为：{settings.behavior_mode}", f"用户请求：{text}"]
+        self._refresh_session_info()
+        self._audit("执行边界：只读工具可直接读取；写入计划必须确认")
         self._diagnostics.event("chat_request", status="started", summary={"tool": "agent"})
         self._active_timeout_seconds = settings.timeout_seconds
         self._agent.reset_request_budget()
@@ -87,7 +233,7 @@ class ApplicationController(QObject):
             self.dock.set_state(ChatState.ERROR, str(exc))
             return
         self._append("user", text)
-        self.dock.set_state(ChatState.SENDING, "正在生成回答…")
+        self.dock.set_stage(WorkbenchStage.MODEL_ANALYSIS, "正在生成回答…")
         self._start_agent_completion(messages)
 
     def cancel_request(self):
@@ -197,7 +343,8 @@ class ApplicationController(QObject):
         if not completion.tool_calls:
             self._append("assistant", completion.content)
             self._diagnostics.event("chat_request", status="success", summary={"has_tool_calls": False})
-            self.dock.set_state(ChatState.READY)
+            self._audit("完成：模型返回自然语言结论")
+            self.dock.set_stage(WorkbenchStage.COMPLETED)
             return
         if completion.content:
             self._append("assistant", completion.content)
@@ -217,7 +364,8 @@ class ApplicationController(QObject):
         if spec is None:
             self._on_failure(f"工具调用失败：工具不存在（{tool_call.name}）。")
             return
-        self.dock.set_state(ChatState.SENDING, f"正在准备工具：{tool_call.name}…")
+        self._audit(f"调用工具：{tool_call.name}")
+        self.dock.set_stage(WorkbenchStage.CALLING_TOOL, f"正在准备工具：{tool_call.name}…")
         with self._diagnostics.timed(f"tool:{tool_call.name}") as diagnostic:
             event, result = self._agent.execute_tool(tool_call.name, tool_call.arguments)
             if result is None or not result.ok:
@@ -233,7 +381,8 @@ class ApplicationController(QObject):
                 self._agent.accept_tool_result(tool_call, result)
             detail = event.detail if result is None else result.error
             self._append("error", f"工具调用失败（{tool_call.name}）：{detail}")
-            self.dock.set_state(ChatState.ERROR, f"工具调用失败：{detail}")
+            self._audit(f"工具失败：{tool_call.name}；{detail}")
+            self.dock.set_stage(WorkbenchStage.FAILED, f"工具调用失败：{detail}")
             return
         if spec.permission == PermissionLevel.WRITE:
             # The provider has already returned an assistant tool_call. Persist a
@@ -243,21 +392,38 @@ class ApplicationController(QObject):
             self._agent.accept_tool_result(tool_call, result)
             self._pending_plan = result.data
             self.dock.show_execution_plan(result.data)
-            self.dock.set_state(ChatState.READY, "已生成执行计划；请核对影响与输出路径后确认或取消。")
+            self.dock.set_plan_controls_enabled(True)
+            self._audit(f"待确认写入：{result.data['title']}；尚未创建文件")
+            self.dock.set_stage(WorkbenchStage.WAITING_CONFIRMATION, "已生成执行计划；请核对影响与输出路径后确认或取消。")
             self._append("tool", f"已生成待确认计划：{result.data['title']}。尚未创建文件或添加图层。")
             return
         self._agent.accept_tool_result(tool_call, result)
         summary = self._tool_summary(result.as_dict())
         self._append("tool", f"工具完成：{tool_call.name}。{summary}")
-        self.dock.set_state(ChatState.SENDING, f"工具完成：{tool_call.name}。正在继续…")
+        self.dock.add_tool_card(ToolCard(
+            tool_call.name,
+            summary,
+            json.dumps(result.as_dict(), ensure_ascii=False, default=str),
+            actions=self._result_actions(result.as_dict()),
+        ))
+        self.view_model.cards.append(ToolCard(
+            tool_call.name, summary,
+            json.dumps(result.as_dict(), ensure_ascii=False, default=str),
+            actions=self._result_actions(result.as_dict()),
+        ))
+        self._audit(f"工具完成：{tool_call.name}；{summary}")
+        self.dock.set_stage(WorkbenchStage.MODEL_ANALYSIS, f"工具完成：{tool_call.name}。正在继续…")
 
     def confirm_pending_plan(self):
         if not self._pending_plan or self._processing_task:
             return
         self.dock.set_plan_controls_enabled(False)
-        self._diagnostics.event("processing:buffer_vector", status="started", summary={"output_path": self._pending_plan.get("output_path", "")})
-        self.dock.set_state(ChatState.SENDING, "正在执行已确认的 GIS 缓冲区任务…")
-        task = BufferProcessingTask(self._pending_plan, self)
+        tool_name = self._pending_plan.get("tool", "buffer_vector")
+        self._diagnostics.event(f"processing:{tool_name}", status="started", summary={"output_path": self._pending_plan.get("output_path", "")})
+        self._audit("用户确认：开始 QGIS Processing")
+        self.dock.set_stage(WorkbenchStage.PROCESSING, f"正在执行已确认的 {tool_name} 任务…")
+        task_type = {"reproject_layer": ReprojectProcessingTask, "clip_vector": VectorProcessingTask, "export_filtered_features": VectorProcessingTask, "intersection": VectorProcessingTask, "dissolve": VectorProcessingTask}.get(tool_name, BufferProcessingTask)
+        task = task_type(self._pending_plan, self)
         self._processing_task = task
         task.completed.connect(self._on_processing_completed)
         task.failed.connect(self._on_processing_failed)
@@ -267,11 +433,12 @@ class ApplicationController(QObject):
     def cancel_pending_plan(self):
         if not self._pending_plan or self._processing_task:
             return
+        tool_name = self._pending_plan.get("tool", "buffer_vector")
         output_path = self._pending_plan["output_path"]
         self._pending_plan = None
         self.dock.hide_execution_plan()
         self._append("tool", f"已取消执行计划；未生成输出文件：{output_path}")
-        self._diagnostics.event("processing:buffer_vector", status="cancelled", summary={"output_path": output_path})
+        self._diagnostics.event(f"processing:{tool_name}", status="cancelled", summary={"output_path": output_path})
         self.dock.set_state(ChatState.CANCELLED, "执行计划已取消；没有写入或添加图层。")
 
     def _on_processing_completed(self, result: dict):
@@ -279,21 +446,36 @@ class ApplicationController(QObject):
         self._processing_task = None
         self.dock.hide_execution_plan()
         self._append("tool", f"Processing 成功：已生成 {result['output_path']}，并添加结果图层 {result['output_layer_name']}（{result['feature_count']} 个要素）。")
-        self._diagnostics.event("processing:buffer_vector", status="success", summary={"feature_count": result["feature_count"]})
-        self.dock.set_state(ChatState.READY, "GIS 处理完成，原始图层未被覆盖。")
+        self._diagnostics.event(f"processing:{result.get('tool', 'reproject_layer' if 'target_crs' in result else 'buffer_vector')}", status="success", summary={"feature_count": result["feature_count"]})
+        self.dock.add_tool_card(ToolCard(
+            "Processing 输出",
+            f"已生成 {result['output_layer_name']}（{result['feature_count']} 个要素）。",
+            json.dumps(result, ensure_ascii=False, default=str),
+            actions=self._result_actions(result),
+        ))
+        self.view_model.cards.append(ToolCard(
+            "Processing 输出",
+            f"已生成 {result['output_layer_name']}（{result['feature_count']} 个要素）。",
+            json.dumps(result, ensure_ascii=False, default=str),
+            actions=self._result_actions(result),
+        ))
+        self._audit(f"完成：输出 {result['output_layer_name']}；{result['feature_count']} 个要素；源图层未覆盖")
+        self._refresh_session_info()
+        self.dock.set_stage(WorkbenchStage.COMPLETED, "GIS 处理完成，原始图层未被覆盖。")
 
     def _on_processing_failed(self, detail: str):
         self._processing_task = None
         self.dock.set_plan_controls_enabled(True)
-        self._diagnostics.event("processing:buffer_vector", status="failure", summary=detail)
+        self._diagnostics.event("processing:write", status="failure", summary=detail)
         self._append("error", f"GIS Processing 失败：{detail}")
-        self.dock.set_state(ChatState.ERROR, f"GIS Processing 失败：{detail}")
+        self._audit(f"Processing 失败：{detail}")
+        self.dock.set_stage(WorkbenchStage.FAILED, f"GIS Processing 失败：{detail}")
 
     def _on_processing_cancelled(self):
         self._processing_task = None
         self._pending_plan = None
         self.dock.hide_execution_plan()
-        self._diagnostics.event("processing:buffer_vector", status="cancelled")
+        self._diagnostics.event("processing:write", status="cancelled")
         self._append("tool", "GIS Processing 已取消；不会把它显示为成功。")
         self.dock.set_state(ChatState.CANCELLED, "GIS Processing 已取消；请检查是否有残留输出文件。")
 

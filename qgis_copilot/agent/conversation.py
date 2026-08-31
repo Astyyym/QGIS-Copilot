@@ -43,3 +43,7 @@ class Conversation:
             raise ValueError("当前会话没有用户问题。")
         messages = ([dict(system)] if system else []) + [dict(message) for message in self._messages[user_index:] if not (message["role"] == "system" and message.get("content", "").startswith("当前 QGIS 上下文："))]
         return messages
+
+    def reset(self) -> None:
+        """Start a fresh conversation while retaining no prior user/tool history."""
+        self._messages.clear()
