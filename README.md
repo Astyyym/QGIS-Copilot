@@ -96,11 +96,14 @@ QT_QPA_PLATFORM=offscreen <QGIS安装目录>/bin/python-qgis.bat -m unittest dis
 
 - [QGIS Copilot v0.2.0](release-notes-v0.2.0.md)：可信 GIS 工作台与 Goal 1–9 完整交付
 
+> **后续兼容承诺：** Goal 1–9 和 v0.2.0 是 v3.0 的不可破坏基线。新能力按独立模块和逻辑任务单开代码文件、增量接入；未经单独批准不重写、重命名、搬迁或删除已验证实现。每个新 Goal 必须通过 Goal 1–9 固定回归和真实 QGIS Desktop 旧代表路径。
+
 产品需求、架构、开发计划、当前阶段状态与技术证据分别见：
 
 - `产品需求文档.md`
 - `架构说明.md`
-- `开发短计划.md`
+- `开发短计划.md`：v2.0 Goal 6-9 历史执行计划
+- `开发短计划-v3.0.md`：当前功能扩展路线、Goal 10-14 与高风险能力边界
 - `task_plan.md`
 - `findings.md`
 
